@@ -3,7 +3,7 @@ A simple interactive ad hoc http server
 
 Need to make a specific file downloadable on a linux server so another server or tool can pick it up for download?
 
-Let's say for example you need to present a .iso file to some OOM management tool as http source
+Let's say for example you need to present a .iso file to some specitic tool as http source
 
 ```bash
 f2http my_installer.iso 80
