@@ -1,7 +1,3 @@
-/* f2http.c
-   File to HTTP download server
-   by darkQ
-*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +6,8 @@
 #include <netinet/in.h>
 #include <sys/sendfile.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <signal.h>
 
 #define BUF_SIZE 262144
 
@@ -60,6 +58,39 @@ void send_full_response(int client, int fd, off_t filesize, const char *filename
     }
 }
 
+void handle_client(int client, const char *filepath, const char *filename, off_t filesize) {
+    int fd = open(filepath, O_RDONLY);
+    if (fd < 0) {
+        perror("open");
+        close(client);
+        exit(1);
+    }
+
+    char buf[BUF_SIZE] = {0};
+    read(client, buf, sizeof(buf) - 1);
+
+    if (strncmp(buf, "GET ", 4) == 0) {
+        char *range = strstr(buf, "Range: bytes=");
+        if (range) {
+            off_t start = 0, end = filesize - 1;
+            sscanf(range, "Range: bytes=%ld-%ld", &start, &end);
+            if (end >= filesize) end = filesize - 1;
+            if (start > end) start = end;
+            send_response(client, fd, filesize, filename, start, end);
+        } else {
+            send_full_response(client, fd, filesize, filename);
+        }
+    }
+    close(fd);
+    close(client);
+    exit(0);
+}
+
+void sigchld_handler(int signo) {
+    (void)signo;
+    while (waitpid(-1, NULL, WNOHANG) > 0);
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 3) {
         fprintf(stderr, "%s\n by darkQ\n\n Syntax: %s <file> <port>\n", argv[0],argv[0]);
@@ -80,40 +111,46 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     off_t filesize = st.st_size;
+    close(fd);
 
     const char *filename = strrchr(filepath, '/');
     filename = filename ? filename + 1 : filepath;
 
     int server = socket(AF_INET, SOCK_STREAM, 0);
+    int opt = 1;
+    setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port);
 
-    bind(server, (struct sockaddr*)&addr, sizeof(addr));
-    listen(server, 5);
+    if (bind(server, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("bind");
+        return 1;
+    }
+    if (listen(server, 5) < 0) {
+        perror("listen");
+        return 1;
+    }
+
+    // Reap children
+    signal(SIGCHLD, sigchld_handler);
 
     while (1) {
         int client = accept(server, NULL, NULL);
         if (client < 0) continue;
 
-        char buf[BUF_SIZE] = {0};
-        read(client, buf, sizeof(buf) - 1);
-
-        if (strncmp(buf, "GET ", 4) == 0) {
-            char *range = strstr(buf, "Range: bytes=");
-            if (range) {
-                off_t start = 0, end = filesize - 1;
-                sscanf(range, "Range: bytes=%ld-%ld", &start, &end);
-                if (end >= filesize) end = filesize - 1;
-                if (start > end) start = end;
-                send_response(client, fd, filesize, filename, start, end);
-            } else {
-                send_full_response(client, fd, filesize, filename);
-            }
+        pid_t pid = fork();
+        if (pid == 0) {
+            // Child
+            close(server);
+            handle_client(client, filepath, filename, filesize);
+        } else if (pid > 0) {
+            // Parent
+            close(client);
         }
-        close(client);
+        // else fork failed, ignore
     }
-    close(fd);
+    close(server);
     return 0;
 }
