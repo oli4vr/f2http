@@ -12,10 +12,11 @@ f2http my_installer.iso 80
 Just Control+C to stop the server.
 
 # Build and install
-It builds to a debian package by default.
+On a debian/ubuntu based distro it can build to a debian package.
 
 ```bash
 make
+make deb
 sudo apt install $(ls ./f2http*.deb)
 ```
 

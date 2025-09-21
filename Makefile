@@ -1,4 +1,4 @@
-all: main deb
+all: main
 main:
 	gcc f2http.c -o f2http -O3
 deb:
